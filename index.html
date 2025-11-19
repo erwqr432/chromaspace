@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ChromaSpace 墙面建筑师</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.344.0",
+        "canvas-confetti": "https://esm.sh/canvas-confetti@1.9.2"
+      }
+    }
+    </script>
+    <script type="module" src="https://esm.sh/run" defer></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        
+        .animate-slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .crop-window-border {
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15); 
+            border: 1px solid rgba(0,0,0,0.05);
+            background-color: #fff;
+        }
+        
+        .panel-mask {
+            background-color: rgba(255, 255, 255, 0.85); 
+            backdrop-filter: grayscale(100%);
+            transition: all 0.3s ease;
+        }
+
+        .panel-active {
+            background-color: transparent;
+            z-index: 10;
+        }
+        
+        .text-gradient-ai {
+            background: linear-gradient(to right, #9333ea, #ec4899, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* 歪头杀交互动效 */
+        .tilt-hover-img {
+            transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform-origin: bottom center;
+        }
+        .group:hover .tilt-hover-img {
+            transform: scale(1.05) rotate(-2deg); /* 结账页面的大图微动效 */
+        }
+        
+        /* 画廊页面的动效 */
+        .gallery-hover-img {
+            transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform-origin: bottom center;
+        }
+        .group:hover .gallery-hover-img {
+            transform: scale(1.5) rotate(-10deg);
+        }
+
+        @media (max-width: 768px) {
+            .crop-window-border {
+                box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.15); 
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans antialiased selection:bg-purple-100 selection:text-purple-900 overflow-x-hidden">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useRef, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import confetti from 'canvas-confetti';
+        import { 
+            Ruler, Check, ShieldCheck, ArrowRight, Sparkles, Move, AlertTriangle, 
+            Package, Leaf, RefreshCw, Video, ChevronLeft, Star, Upload, Truck, Home, 
+            Maximize2, RotateCcw, FlipHorizontal, Info, X, Grid3X3, LayoutTemplate, ArrowLeftRight,
+            Droplets, Wind, Layers, Home as HomeIcon, Building, Scissors, Edit2, FileText, Hand, 
+            MousePointerClick, CheckCircle2, Hash, User, MapPin, Phone, ShoppingBag, Plus, Bot, Wand2
+        } from 'lucide-react';
+
+        const apiKey = ""; 
+        const BLEED_CM = 5;
+        const KIT_PRICE = 99; 
+        const SAMPLE_PRICE = 29;
+        const MURAL_ORIGINAL_WIDTH_CM = 600;
+        const MURAL_ORIGINAL_HEIGHT_CM = 400;
+
+        const RECOMMENDATIONS = [
+            { id: 'r1', name: '同款图案抱枕 (45cm)', price: 129, icon: <Star size={16} className="text-yellow-500"/>, desc: '丝绒材质，完美呼应墙面' },
+            { id: 'r2', name: '专业墙纸基膜 (1L)', price: 59, icon: <Droplets size={16} className="text-blue-500"/>, desc: '防潮抗碱，延长墙纸寿命' },
+        ];
+
+        const INITIAL_PATTERNS = [
+            { id: 'p1', category: 'nature', name: '莫奈的花园', enName: 'Monet Garden', style: '印象派油画', url: "https://images.unsplash.com/photo-1490750967868-58cb75063ed4?q=80&w=2670", thumb: "https://images.unsplash.com/photo-1490750967868-58cb75063ed4?q=80&w=400", badge: "热销榜首" },
+            { id: 'p2', category: 'nature', name: '午夜丛林', enName: 'Midnight Jungle', style: '暗黑植物风', url: "https://images.unsplash.com/photo-1543254898-4397eb34249e?q=80&w=2662", thumb: "https://images.unsplash.com/photo-1543254898-4397eb34249e?q=80&w=400" },
+            { id: 'p3', category: 'geometric', name: '极简水磨石', enName: 'Terrazzo Minimal', style: '北欧极简', url: "https://images.unsplash.com/photo-1518640467707-6811f4a6ab73?q=80&w=2680", thumb: "https://images.unsplash.com/photo-1518640467707-6811f4a6ab73?q=80&w=400" },
+            { id: 'p4', category: 'kids', name: '云端梦境', enName: 'Cloud Nine', style: '梦幻童趣', url: "https://images.unsplash.com/photo-1508163223045-1880bc36e222?q=80&w=2674", thumb: "https://images.unsplash.com/photo-1508163223045-1880bc36e222?q=80&w=400" },
+            { id: 'p5', category: 'geometric', name: '孟菲斯几何', enName: 'Memphis Pop', style: '艺术装饰', url: "https://images.unsplash.com/photo-1614850523459-c2f4c699c52e?q=80&w=2670", thumb: "https://images.unsplash.com/photo-1614850523459-c2f4c699c52e?q=80&w=400" },
+            { id: 'p6', category: 'texture', name: '托斯卡纳', enName: 'Tuscany Marble', style: '轻奢纹理', url: "https://images.unsplash.com/photo-1558603668-6570496b66f8?q=80&w=2670", thumb: "https://images.unsplash.com/photo-1558603668-6570496b66f8?q=80&w=400" },
+            { id: 'p7', category: 'kids', name: '奇幻热气球', enName: 'Vintage Balloons', style: '探险插画', url: "https://images.unsplash.com/photo-1529973625058-a665431328fb?q=80&w=2670", thumb: "https://images.unsplash.com/photo-1529973625058-a665431328fb?q=80&w=400" },
+            { id: 'p8', category: 'texture', name: '复古水泥', enName: 'Concrete Loft', style: '工业风', url: "https://images.unsplash.com/photo-1517646287270-a5a9ca602e5c?q=80&w=2670", thumb: "https://images.unsplash.com/photo-1517646287270-a5a9ca602e5c?q=80&w=400" }
+        ];
+
+        const MATERIALS = [
+          { id: 'non_woven', name: '呼吸型简易贴 (Matte Paper)', price: 68, tagline: '卧室首选 / 博物馆级纸基', desc: '就像给墙穿了一件纯棉T恤，透气防霉，撕下无痕。', features: ['极致哑光', '透气防霉', '植物纤维'], scenarios: ['主卧', '儿童房', '书房'], recommendation: '追求环保与细腻质感的家庭', texturePattern: 'radial-gradient(#cbd5e1 1px, transparent 1px)', bgColor: '#fff', icon: <Wind size={20} /> },
+          { id: 'vinyl', name: '耐磨铠甲贴 (Heavy Vinyl)', price: 85, tagline: '浴室首选 / 抗污防刮', desc: '表面有一层防水抗污涂层，孩子乱画、油污溅射都不怕。', features: ['防水防油', '耐擦洗', '抗刮痕'], scenarios: ['浴室', '厨房', '玄关', '餐厅'], recommendation: '有小孩、宠物或用于高频活动区', texturePattern: 'repeating-linear-gradient(45deg, #f1f5f9 0px, #f1f5f9 2px, #e2e8f0 2px, #e2e8f0 3px)', bgColor: '#f8fafc', icon: <Droplets size={20} /> },
+          { id: 'peel_stick', name: '大号便利贴 (Peel & Stick)', price: 45, tagline: '租房神器 / 自带背胶', desc: '无需刷胶，撕开背面的纸就能贴。虽然质感不如前两者厚实，但胜在方便，适合短期居住或局部装饰。', features: ['自带背胶', '安装简单', '易撕除'], scenarios: ['租房改造', '局部装饰', '商业快闪'], recommendation: 'DIY新手、租房党、短期装饰', texturePattern: 'linear-gradient(0deg, rgba(0,0,0,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.05) 1px, transparent 1px)', bgColor: '#fff', icon: <Scissors size={20} /> }
+        ];
+
+        const STEPS = [
+            { id: 'measure', label: '尺寸', number: 1 },
+            { id: 'material', label: '材质', number: 2 },
+            { id: 'gallery', label: '图案', number: 3 },
+            { id: 'configurator', label: '定制', number: 4 },
+            { id: 'checkout', label: '确认', number: 5 }
+        ];
+
+        const CATEGORY_MAP = { 'All': '全部', 'Nature': '自然', 'Geometric': '几何', 'Kids': '童趣', 'Texture': '纹理', 'AI': 'AI' };
+
+        function WallArchitect() {
+          const [activeStep, setActiveStep] = useState('measure'); 
+          const [width, setWidth] = useState(300);
+          const [height, setHeight] = useState(250);
+          const [material, setMaterial] = useState(MATERIALS[0]);
+          const [patterns, setPatterns] = useState(INITIAL_PATTERNS);
+          const [pattern, setPattern] = useState(null);
+          const [includeKit, setIncludeKit] = useState(false);
+          const [orderSample, setOrderSample] = useState(false);
+          const [unit, setUnit] = useState('cm');
+          const [orderId, setOrderId] = useState('');
+          const [selectedRecs, setSelectedRecs] = useState(new Set());
+
+          const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', address: '' });
+          const [formErrors, setFormErrors] = useState({});
+          const [orders, setOrders] = useState([]); 
+
+          // AI & Configurator States
+          const [showAiModal, setShowAiModal] = useState(false);
+          const [aiPrompt, setAiPrompt] = useState('');
+          const [isGenerating, setIsGenerating] = useState(false);
+          const [showMaterialAdvisor, setShowMaterialAdvisor] = useState(false);
+          const [advisorInput, setAdvisorInput] = useState('');
+          const [advisorResponse, setAdvisorResponse] = useState('');
+          const [isAdvising, setIsAdvising] = useState(false);
+          const [isEditingDims, setIsEditingDims] = useState(false);
+          const [isEditingMat, setIsEditingMat] = useState(false);
+          const [cropPos, setCropPos] = useState({ x: 50, y: 50 });
+          const [isFlipped, setIsFlipped] = useState(false);
+          const [selectedPanels, setSelectedPanels] = useState(new Set()); 
+          const [showRefPerson, setShowRefPerson] = useState(false); 
+          const [selectedPanelIndex, setSelectedPanelIndex] = useState(null);
+          const [hasInteracted, setHasInteracted] = useState(false); 
+          
+          useEffect(() => { setOrderId(`CS-${Math.floor(Math.random()*100000)}`); }, []);
+
+          const bleedWidth = width + BLEED_CM * 2;
+          const bleedHeight = height + BLEED_CM * 2;
+          const areaSqm = (bleedWidth * bleedHeight) / 10000;
+          
+          const calculatePanels = (w) => {
+            let count = Math.round(w / 70); 
+            if (count < 1) count = 1;
+            let panelW = w / count;
+            if (panelW < 50 && count > 1) count--;
+            if (panelW > 100) count++;
+            return { count, width: w / count };
+          };
+
+          const panelInfo = calculatePanels(bleedWidth);
+          const panels = panelInfo.count;
+          const panelWidthVal = panelInfo.width;
+
+          useEffect(() => {
+              const allPanels = new Set(Array.from({ length: panels }, (_, i) => i));
+              setSelectedPanels(allPanels);
+          }, [panels, activeStep]);
+
+          const selectedRatio = selectedPanels.size > 0 ? selectedPanels.size / panels : 0; 
+          const basePrice = Math.round(areaSqm * material.price);
+          const adjustedPrice = Math.round(basePrice * selectedRatio);
+          const recPrice = Array.from(selectedRecs).reduce((total, id) => {
+              const item = RECOMMENDATIONS.find(r => r.id === id);
+              return total + (item ? item.price : 0);
+          }, 0);
+          const finalPrice = adjustedPrice + (includeKit ? KIT_PRICE : 0) + (orderSample ? SAMPLE_PRICE : 0) + recPrice;
+
+          const containerRef = useRef(null);
+          const fileInputRef = useRef(null);
+
+          const handlePatternSelect = (pat) => {
+              setPattern(pat);
+              setActiveStep('configurator');
+              setCropPos({ x: 50, y: 50 });
+              setSelectedPanelIndex(null); 
+              setHasInteracted(false); 
+          };
+
+          const handleFileUpload = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    handlePatternSelect({
+                        id: 'custom', category: 'custom', name: '我的上传', enName: 'Custom Upload',
+                        style: '自定义设计', url: ev.target.result, thumb: ev.target.result
+                    });
+                };
+                reader.readAsDataURL(file);
+            }
+          };
+
+          const handlePanelClick = (e, index) => {
+              e.stopPropagation();
+              if (!hasInteracted) setHasInteracted(true);
+              const newSet = new Set(selectedPanels);
+              const sortedSelected = Array.from(newSet).sort((a, b) => a - b);
+              const isAllSelected = sortedSelected.length === panels;
+              if (isAllSelected) { setSelectedPanels(new Set([index])); return; }
+              if (newSet.has(index)) {
+                  const min = sortedSelected[0];
+                  const max = sortedSelected[sortedSelected.length - 1];
+                  if (index === min) { newSet.delete(index); }
+                  else if (index === max) { newSet.delete(index); }
+                  else { if (index !== min && index !== max) { setSelectedPanels(new Set([index])); return; } }
+              } else {
+                  if (sortedSelected.length === 0) { newSet.add(index); }
+                  else {
+                      const min = sortedSelected[0];
+                      const max = sortedSelected[sortedSelected.length - 1];
+                      const newMin = Math.min(min, index);
+                      const newMax = Math.max(max, index);
+                      for (let i = newMin; i <= newMax; i++) { newSet.add(i); }
+                  }
+              }
+              if (newSet.size === 0) newSet.add(index);
+              setSelectedPanels(newSet);
+          };
+
+          const handleContainerClick = (e) => {
+             if(e.target === containerRef.current) {
+                const all = new Set(Array.from({ length: panels }, (_, i) => i));
+                setSelectedPanels(all);
+                setSelectedPanelIndex(null);
+             }
+          };
+
+          const toggleRec = (id) => {
+              const newSet = new Set(selectedRecs);
+              if (newSet.has(id)) newSet.delete(id);
+              else newSet.add(id);
+              setSelectedRecs(newSet);
+          };
+
+          const handlePay = () => {
+            const errors = {};
+            if (!customerInfo.name) errors.name = "请输入姓名";
+            if (!customerInfo.phone) errors.phone = "请输入电话";
+            if (!customerInfo.address) errors.address = "请输入地址";
+            if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
+            const newOrder = {
+                id: orderId,
+                date: new Date().toLocaleDateString(),
+                pattern: pattern,
+                width: width,
+                height: height,
+                material: material,
+                price: finalPrice,
+                status: '生产中',
+                items: selectedPanels.size + '幅',
+                customer: customerInfo
+            };
+            setOrders([newOrder, ...orders]);
+            setActiveStep('success');
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+          };
+
+          const handleAiGenerate = async () => { 
+             if (!aiPrompt) return;
+            setIsGenerating(true);
+            setTimeout(() => {
+                 const newPattern = {
+                        id: `ai-${Date.now()}`, category: 'AI', name: 'AI 灵感之作', enName: 'AI Masterpiece',
+                        style: 'Custom Generated', url: "https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=2670", thumb: "https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400", badge: '✨ AI Original'
+                    };
+                setPatterns([newPattern, ...patterns]);
+                handlePatternSelect(newPattern);
+                setShowAiModal(false);
+                setAiPrompt('');
+                setIsGenerating(false);
+            }, 1500);
+          };
+          
+          const handleAskAdvisor = async () => {
+              if (!advisorInput) return;
+              setIsAdvising(true);
+              setTimeout(() => {
+                  setAdvisorResponse("根据您的描述，推荐使用【耐磨铠甲贴】。这种材质防水防刮，非常适合有宠物的环境，打理起来非常方便。");
+                  setIsAdvising(false);
+              }, 1000);
+          };
+
+          const StepNavigation = () => (
+              <div className="flex items-center gap-2 md:gap-6">
+                  {STEPS.map((step, idx) => {
+                      const stepIndex = STEPS.findIndex(s => s.id === activeStep);
+                      const isCompleted = stepIndex > idx;
+                      const isActive = activeStep === step.id;
+                      const isVisibleMobile = Math.abs(stepIndex - idx) <= 1;
+                      return (
+                          <div key={step.id} onClick={() => isCompleted ? setActiveStep(step.id) : null} className={`flex items-center gap-2 transition-colors duration-300 cursor-pointer ${isActive || isCompleted ? 'text-gray-900' : 'text-gray-300'} ${!isVisibleMobile ? 'hidden md:flex' : 'flex'}`}>
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border transition-all ${isActive ? 'bg-purple-600 border-purple-600 text-white' : isCompleted ? 'bg-black border-black text-white' : 'border-gray-200 bg-white text-gray-400'}`}>{isCompleted ? <Check size={12} strokeWidth={3}/> : step.number}</div>
+                              <span className={`text-xs font-bold uppercase tracking-wider hidden lg:inline ${isActive ? 'text-purple-600' : ''}`}>{step.label}</span>
+                              {idx < STEPS.length - 1 && (<div className={`w-4 h-px hidden lg:block transition-colors ${isCompleted ? 'bg-gray-300' : 'bg-gray-100'}`}></div>)}
+                          </div>
+                      );
+                  })}
+              </div>
+          );
+
+          const GlobalHeader = () => (
+             <header className="sticky top-0 bg-white/90 backdrop-blur-md z-40 border-b border-gray-100 px-4 md:px-6 h-14 md:h-16 flex justify-between items-center">
+                <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveStep('measure')}>
+                    <div className="w-8 h-8 bg-black text-white flex items-center justify-center rounded-lg font-bold text-lg shadow-sm">C</div>
+                    <span className="font-bold tracking-tight text-lg hidden sm:block">ChromaSpace</span>
+                </div>
+                {activeStep !== 'orders' && <StepNavigation />}
+                <button onClick={() => setActiveStep('orders')} className="p-2 rounded-full hover:bg-gray-100 text-gray-600 transition-colors flex items-center gap-2"><User size={20} /><span className="text-xs font-bold hidden sm:inline">我的订单</span></button>
+            </header>
+          );
+
+          // Views 1-3 ...
+          if (activeStep === 'measure') {
+               const visualMax = 400; const safeW = width || 300; const safeH = height || 250; const scale = Math.min(visualMax / safeW, visualMax / safeH); const displayW = safeW * scale; const displayH = safeH * scale; const personHeightVal = unit === 'cm' ? 180 : 71; const personVisualH = personHeightVal * scale;
+              return (
+                <div className="min-h-screen bg-white flex flex-col"><GlobalHeader /><div className="flex-1 flex flex-col md:flex-row"><div className="w-full md:w-1/2 p-6 md:p-16 flex flex-col justify-center animate-slide-up order-2 md:order-1"><h2 className="text-3xl font-extrabold mb-6 text-gray-900">你的墙有多大？</h2><div className="bg-gray-100 p-1 rounded-lg inline-flex items-center text-xs font-bold mb-6 self-start"><button onClick={() => setUnit('cm')} className={`px-4 py-2 rounded-md transition-all ${unit === 'cm' ? 'bg-white shadow text-black' : 'text-gray-400'}`}>CM</button><button onClick={() => setUnit('inch')} className={`px-4 py-2 rounded-md transition-all ${unit === 'inch' ? 'bg-white shadow text-black' : 'text-gray-400'}`}>INCH</button></div><div className="space-y-6 max-w-md"><div className="relative group"><label className="block text-xs font-bold uppercase tracking-wider mb-2 text-gray-500">宽度 ({unit})</label><input type="number" value={width} onChange={(e) => setWidth(Number(e.target.value))} className="w-full p-5 text-xl font-mono border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-100 focus:border-purple-600 outline-none transition-all" /><ArrowLeftRight className="absolute right-4 bottom-5 text-gray-400" size={20} /></div><div className="relative group"><label className="block text-xs font-bold uppercase tracking-wider mb-2 text-gray-500">高度 ({unit})</label><input type="number" value={height} onChange={(e) => setHeight(Number(e.target.value))} className="w-full p-5 text-xl font-mono border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-100 focus:border-purple-600 outline-none transition-all" /><Ruler className="absolute right-4 bottom-5 text-gray-400 rotate-90" size={20} /></div></div><div className="flex items-start gap-3 bg-purple-50 text-purple-900 text-sm p-4 rounded-xl border border-purple-100 mt-8 max-w-md"><ShieldCheck size={20} className="shrink-0 mt-0.5 text-purple-600" /><div><span className="font-bold block">智能容错系统已开启</span>系统已自动为您增加 <span className="font-bold underline decoration-purple-300">{BLEED_CM}{unit}</span> 的安全出血位。</div></div><button onClick={() => setActiveStep('material')} className="mt-10 w-full max-w-md bg-black text-white py-4 rounded-xl font-bold text-lg hover:bg-gray-800 shadow-lg transition-all flex items-center justify-center gap-2">下一步：选材质 <ArrowRight size={18} /></button></div><div className="w-full md:w-1/2 bg-gray-100 relative overflow-hidden flex items-center justify-center order-1 md:order-2 h-64 md:h-auto border-b md:border-b-0 md:border-l border-gray-200"><div className="absolute inset-0 opacity-[0.03]" style={{backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '24px 24px'}}></div><div className="relative flex items-end transform scale-75 md:scale-100 transition-transform"><div className="border-4 border-white shadow-2xl bg-white transition-all duration-500 relative z-10" style={{ width: `${displayW}px`, height: `${displayH}px` }}><div className="absolute inset-0 bg-gray-50 flex items-center justify-center text-gray-300 font-mono text-xs">{width} x {height}</div><div className="absolute -top-8 left-0 w-full text-center text-gray-400 text-xs">{width} {unit}</div><div className="absolute -left-8 top-0 h-full flex items-center text-gray-400 text-xs -rotate-90">{height} {unit}</div><div className="absolute bottom-0 right-4 opacity-50 pointer-events-none" style={{ height: `${personVisualH}px` }}><svg viewBox="0 0 100 280" className="h-full fill-gray-800 drop-shadow-md"><path d="M50,20 C60,20 68,28 68,38 C68,48 60,56 50,56 C40,56 32,48 32,38 C32,28 40,20 50,20 Z M50,60 C65,60 80,75 80,100 L80,160 L70,160 L70,110 C70,110 70,110 70,110 L55,110 L55,270 L45,270 L45,160 L35,160 L35,270 L25,270 L25,110 L10,110 L10,160 L0,160 L0,100 C0,75 15,60 50,60 Z" /></svg><div className="absolute -left-16 top-1/2 -translate-y-1/2 flex items-center justify-end w-16"><span className="text-[10px] font-bold text-gray-500 bg-white/80 px-1 rounded whitespace-nowrap">180cm</span><div className="w-2 h-px bg-gray-400 ml-1"></div></div></div></div></div></div></div></div>
+              );
+          }
+          if (activeStep === 'material') {
+               return (<div className="min-h-screen bg-white flex flex-col"><GlobalHeader /><div className="flex-1 flex flex-col md:flex-row"><div className="w-full md:w-1/2 p-6 md:p-12 flex flex-col overflow-y-auto animate-slide-up order-2 md:order-1"><button onClick={() => setActiveStep('measure')} className="flex items-center gap-2 text-gray-400 hover:text-black mb-6 text-sm font-medium transition-colors self-start"><ChevronLeft size={16}/> 返回改尺寸</button><h2 className="text-3xl font-extrabold mb-2 text-gray-900">选个适合你的材质</h2><p className="text-gray-500 mb-6">不确定选哪个？问问 AI 顾问吧。</p><div className="mb-6"><button onClick={() => setShowMaterialAdvisor(!showMaterialAdvisor)} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-md hover:shadow-lg transition-all"><Wand2 size={16} /> {showMaterialAdvisor ? '收起顾问' : 'AI 材质顾问'}</button>{showMaterialAdvisor && (<div className="mt-3 p-4 bg-purple-50 border border-purple-100 rounded-xl animate-fade-in"><div className="flex gap-2 mb-3"><Bot className="text-purple-600 shrink-0" /><div className="text-sm text-purple-800 font-medium">告诉我您的房间情况（如潮湿、有宠物、婴儿房等），我来为您推荐。</div></div><div className="flex gap-2"><input type="text" value={advisorInput} onChange={(e) => setAdvisorInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAskAdvisor()} placeholder="例如：我有两只猫，贴在客厅..." className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" /><button onClick={handleAskAdvisor} disabled={isAdvising} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50">{isAdvising ? '分析中...' : '发送'}</button></div>{advisorResponse && (<div className="mt-3 pt-3 border-t border-purple-200 text-sm text-gray-700 bg-white p-3 rounded-lg shadow-sm"><span className="font-bold text-purple-600">AI 建议：</span> {advisorResponse}</div>)}</div>)}</div><div className="space-y-4 max-w-lg">{MATERIALS.map((mat) => (<div key={mat.id} onClick={() => setMaterial(mat)} className={`group p-5 rounded-2xl border-2 cursor-pointer transition-all duration-300 relative ${material.id === mat.id ? 'border-purple-600 bg-purple-50 shadow-md' : 'border-gray-200 hover:border-purple-200 hover:bg-white hover:shadow-sm'}`}><div className="flex justify-between items-start"><div className="flex items-center gap-3"><div className={`p-2 rounded-lg ${material.id === mat.id ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-500'}`}>{mat.icon}</div><div><span className="font-bold text-lg text-gray-900 block">{mat.name}</span><span className="text-xs text-gray-500 font-medium uppercase tracking-wide">{mat.tagline.split(' / ')[0]}</span></div></div><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${material.id === mat.id ? 'border-purple-600 bg-purple-600 text-white' : 'border-gray-300'}`}>{material.id === mat.id && <Check size={14} strokeWidth={3} />}</div></div><div className="mt-3 text-sm text-gray-600 leading-relaxed">{mat.desc}</div></div>))}</div><button onClick={() => setActiveStep('gallery')} className="mt-10 w-full max-w-lg bg-black text-white py-4 rounded-xl font-bold text-lg hover:bg-gray-800 shadow-lg transition-all flex items-center justify-center gap-2">下一步：选图案 <ArrowRight size={18} /></button></div><div className="w-full md:w-1/2 bg-gray-50 relative overflow-hidden flex flex-col items-center justify-center p-12 border-l border-gray-200 order-1 md:order-2 h-48 md:h-auto"><div className="absolute inset-0 opacity-5 pointer-events-none" style={{backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px'}}></div><div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden animate-fade-in transform transition-all duration-500 scale-75 md:scale-100"><div className="h-48 md:h-64 w-full relative transition-all duration-500" style={{backgroundColor: material.bgColor, backgroundImage: material.texturePattern, backgroundSize: '20px 20px'}}><div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur px-3 py-1 rounded-full text-xs font-bold text-gray-600 shadow-sm border border-gray-100">1:1 纹理细节</div></div><div className="p-6 md:p-8"><h3 className="text-xl font-bold text-gray-900 mb-1">{material.name.split('(')[0]}</h3><p className="text-sm text-gray-500 mb-4">{material.tagline}</p><div className="space-y-4"><div className="flex flex-wrap gap-2">{material.features.map((feat, idx) => (<span key={idx} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-md text-xs font-medium border border-gray-200">{feat}</span>))}</div><div className="text-xs text-gray-500">{material.recommendation}</div></div></div></div></div></div></div>
+              );
+          }
+          if (activeStep === 'gallery') {
+              return (
+              <div className="min-h-screen bg-white flex flex-col"><GlobalHeader /><main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-8 md:py-12 animate-slide-up"><div className="text-center mb-8 md:mb-12 space-y-4"><button onClick={() => setActiveStep('material')} className="md:hidden flex items-center gap-2 text-gray-400 hover:text-black mb-4 mx-auto text-sm font-medium"><ChevronLeft size={16}/> 返回选材</button><h1 className="text-3xl md:text-5xl font-extrabold tracking-tight text-gray-900">为您的墙面 <br/> <span className="text-gray-400 font-normal">挑选一个新世界。</span></h1><div className="flex justify-center gap-2 mt-6 flex-wrap">{['All', 'Nature', 'Geometric', 'Kids', 'Texture', 'AI'].map(cat => (<button key={cat} className="px-4 py-2 rounded-full text-xs md:text-sm font-medium bg-gray-100 text-gray-600 hover:bg-black hover:text-white transition-all">{CATEGORY_MAP[cat]}</button>))}</div></div><div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 gap-y-8 md:gap-y-12 pb-12"><div onClick={() => setShowAiModal(true)} className="aspect-[3/4] rounded-none border-2 border-dashed border-purple-300 bg-purple-50/50 flex flex-col items-center justify-center cursor-pointer hover:border-purple-500 hover:bg-purple-100 transition-all group relative overflow-hidden"><div className="absolute inset-0 opacity-30 bg-gradient-to-tr from-purple-200 to-pink-200 pointer-events-none"></div><Sparkles className="text-purple-400 group-hover:text-purple-600 mb-3 transition-colors" size={32} /><span className="font-bold text-sm text-purple-600 text-gradient-ai">AI 灵感创作</span><span className="text-[10px] text-gray-400 mt-1">描述您想要的画面</span></div><div onClick={() => fileInputRef.current.click()} className="aspect-[3/4] rounded-none border border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-black hover:bg-gray-50 transition-all group"><input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" /><Upload className="text-gray-400 group-hover:text-black mb-2 transition-colors" size={32} strokeWidth={1} /><span className="font-medium text-sm text-gray-500 group-hover:text-black">上传您的图片</span></div>{patterns.map(pat => (<div key={pat.id} onClick={() => handlePatternSelect(pat)} className="group cursor-pointer"><div className="aspect-[3/4] overflow-hidden bg-gray-100 mb-4 relative"><img src={pat.thumb} alt={pat.name} className="w-full h-full object-cover transition-transform duration-500 ease-in-out group-hover:scale-150 group-hover:rotate-[-10deg] tilt-hover-img" /><div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><button className="bg-white text-black px-6 py-3 rounded-full font-bold text-sm transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 shadow-xl flex items-center gap-2">去定制 <ArrowRight size={14} /></button></div>{pat.badge && <div className="absolute top-2 left-2 bg-white/90 backdrop-blur text-[10px] font-bold px-2 py-1 uppercase tracking-wider">{pat.badge}</div>}</div><div><h3 className="font-bold text-gray-900 text-lg leading-none">{pat.name}</h3><p className="text-gray-500 text-sm mt-1">{pat.style}</p></div></div>))}</div>{showAiModal && (<div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"><div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"><div className="p-6 border-b border-gray-100 flex justify-between items-center"><div className="flex items-center gap-2"><Sparkles className="text-purple-600" size={20}/><h3 className="font-bold text-lg">AI 壁画生成器</h3></div><button onClick={() => setShowAiModal(false)}><X className="text-gray-400 hover:text-black"/></button></div><div className="p-6"><p className="text-sm text-gray-600 mb-4">请描述您想要生成的壁画风格、内容和色调。</p><textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} placeholder="例如：一副水彩风格的森林晨雾，色调偏绿，宁静致远..." className="w-full border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none h-32 resize-none"></textarea><button onClick={handleAiGenerate} disabled={isGenerating || !aiPrompt.trim()} className={`w-full mt-4 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all ${isGenerating ? 'bg-gray-400 cursor-wait' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:shadow-lg'}`}>{isGenerating ? (<><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div> 正在绘图...</>) : (<><Wand2 size={16}/> 开始生成</>)}</button></div></div></div>)}</main></div>
+            );
+          }
+
+          // View 4: Configurator
+          if (activeStep === 'configurator' && pattern) {
+            const cropWidthPercent = (bleedWidth / MURAL_ORIGINAL_WIDTH_CM) * 100;
+            const selectedCount = selectedPanels.size;
+            const sortedSelectedIndices = Array.from(selectedPanels).sort((a, b) => a - b);
+            const currentSelectionWidth = Math.round(selectedPanels.size * panelWidthVal);
+
+            return (
+                <div className="h-screen flex flex-col bg-white overflow-hidden"><GlobalHeader /><div className="flex-1 flex flex-col md:flex-row overflow-hidden"><div className="flex-1 bg-[#F4F4F4] relative overflow-hidden flex items-center justify-center cursor-default select-none group order-1 md:order-1" ref={containerRef} onClick={handleContainerClick}><div className="absolute top-0 left-0 w-full h-8 bg-[#EBF0F5] z-20 flex items-end px-4 border-b border-gray-300/50"><div className="w-full flex justify-between text-[10px] text-gray-400 font-mono"><span>0cm</span><span>300cm</span><span>600cm</span></div></div><div className="relative z-10 crop-window-border transition-all duration-200 ease-out overflow-visible" style={{ width: `${Math.min(85, cropWidthPercent * 1.5)}%`, aspectRatio: `${width}/${height}`, backgroundImage: `url(${pattern.url})`, backgroundSize: 'cover', backgroundPosition: 'center', transform: `translate(${(cropPos.x - 50) * 0.8}px, ${(cropPos.y - 50) * 0.8}px)`, }}><div className="absolute inset-0 flex z-20">{Array.from({ length: panels }).map((_, i) => { const isSelected = selectedPanels.has(i); return ( <div key={i} onClick={(e) => handlePanelClick(e, i)} className={`flex-1 relative flex flex-col justify-between group/panel cursor-pointer border-r border-dashed border-white/20 last:border-r-0 ${isSelected ? 'panel-active' : 'panel-mask'} `} > <div className={`absolute -top-16 w-full text-center transition-all duration-300`}> <div className={`inline-flex items-center justify-center w-6 h-6 text-[10px] font-bold rounded-full shadow-sm transition-colors ${isSelected ? 'bg-purple-600 text-white scale-110' : 'bg-gray-200 text-gray-400'} `}> {i + 1} </div> </div> <div className="absolute -top-8 left-0 w-full flex pointer-events-none z-30 items-end justify-center pb-1 border-b border-gray-400/50 h-8"> <span className={`text-[9px] font-mono font-bold transition-colors mb-1 ${isSelected ? 'text-purple-600' : 'text-gray-500'}`}> {Math.round(panelWidthVal)}cm </span> <div className="absolute bottom-0 right-0 w-px h-2 bg-gray-400/50"></div> {i === 0 && <div className="absolute bottom-0 left-0 w-px h-2 bg-gray-400/50"></div>} </div> </div> ); })}</div><div className="absolute -left-12 top-0 h-full flex items-center justify-end w-10 pr-2 border-r-2 border-gray-200"><span className="text-xs font-bold text-gray-400 rotate-[-90deg] whitespace-nowrap">{height} cm</span></div><div className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 text-xs font-bold text-gray-600 bg-white/90 backdrop-blur px-4 py-1.5 rounded-full shadow-sm border border-gray-200 z-30 whitespace-nowrap pointer-events-none w-max"><ArrowLeftRight size={12} /><span>总宽 {width} cm</span><span className="text-gray-300">|</span><span>共 {panels} 幅</span><ArrowLeftRight size={12} /></div></div>{!hasInteracted && (<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/90 backdrop-blur px-6 py-3 rounded-full shadow-xl border border-gray-200 flex items-center gap-2 animate-fade-in pointer-events-none z-50"><MousePointerClick size={20} className="text-purple-600 animate-bounce" /><span className="text-sm font-bold text-gray-800">点击画面分条可单独查看细节</span></div>)}</div><div className="w-full md:w-[400px] bg-white border-l border-gray-200 flex flex-col h-[40vh] md:h-full animate-slide-up shadow-2xl z-20 order-2 md:order-2"><div className="p-6 border-b border-gray-100"><div className="flex justify-between items-start mb-1"><button onClick={() => setActiveStep('gallery')} className="flex items-center gap-2 text-gray-400 hover:text-black text-xs font-bold uppercase tracking-widest"><ChevronLeft size={12}/> 重选图案</button><div className="text-[10px] font-mono text-gray-400 bg-gray-50 px-2 py-1 rounded">#{orderId}</div></div><h2 className="text-2xl font-bold text-gray-900 mt-2">{pattern.name}</h2><p className="text-xs text-gray-500 mt-1">{pattern.style}</p></div><div className="flex-1 overflow-y-auto p-6 space-y-8"><div><label className="text-xs font-bold uppercase tracking-wide text-gray-900 flex items-center gap-2 mb-3"><Layers size={14}/> 选区预览 ({selectedCount}幅)</label><div className="bg-gray-100 rounded-lg p-2 flex justify-center overflow-hidden relative h-24 border border-gray-200">{selectedCount > 0 ? (<div className="flex h-full shadow-sm bg-white">{sortedSelectedIndices.map((panelIndex) => (<div key={panelIndex} className="h-full bg-cover relative border-r border-white/50 last:border-r-0" style={{ width: '30px', backgroundImage: `url(${pattern.url})`, backgroundSize: `${panels * 100}% 100%`, backgroundPosition: `${(panelIndex / (panels - 1)) * 100}% center` }}></div>))}</div>) : (<div className="flex items-center justify-center text-gray-400 text-xs italic w-full">请在左侧点击画面选择</div>)}</div></div><div className="space-y-4"><div className="p-4 bg-gray-50 rounded-lg border border-gray-100 flex justify-between items-center"><div><div className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1"><Ruler size={10}/> 墙面尺寸</div><div className="font-mono font-bold text-lg text-gray-900">{width} x {height} {unit}</div></div><button onClick={() => setIsEditingDims(!isEditingDims)} className="text-purple-600 text-xs font-bold flex items-center gap-1 hover:bg-purple-50 px-2 py-1 rounded transition-colors"><Edit2 size={10}/> 修改</button></div>{isEditingDims && (<div className="flex gap-3 animate-fade-in p-4 bg-gray-50 rounded-lg -mt-4 border-t-0 rounded-t-none border border-gray-100 border-t-0"><div className="flex-1"><label className="text-[10px] font-bold text-gray-400 block mb-1">宽</label><input type="number" value={width} onChange={e => setWidth(Number(e.target.value))} className="w-full p-2 text-sm border rounded"/></div><div className="flex-1"><label className="text-[10px] font-bold text-gray-400 block mb-1">高</label><input type="number" value={height} onChange={e => setHeight(Number(e.target.value))} className="w-full p-2 text-sm border rounded"/></div></div>)}<div className="p-4 bg-gray-50 rounded-lg border border-gray-100"><div className="flex justify-between items-start mb-2"><div className="text-xs font-bold text-gray-400 uppercase tracking-wide flex items-center gap-1"><Package size={10}/> 材质</div><button onClick={() => setIsEditingMat(!isEditingMat)} className="text-purple-600 text-xs font-bold flex items-center gap-1 hover:bg-purple-50 px-2 py-1 rounded transition-colors"><Edit2 size={10}/> 修改</button></div><div className="font-bold text-sm text-gray-900">{material.name}</div>{isEditingMat && (<div className="mt-3 space-y-2 animate-fade-in border-t border-gray-200 pt-3">{MATERIALS.map(mat => (<div key={mat.id} onClick={() => { setMaterial(mat); setIsEditingMat(false); }} className={`p-2 rounded border cursor-pointer text-xs flex justify-between ${material.id === mat.id ? 'bg-white border-black' : 'border-gray-200'}`}>{mat.name} {material.id === mat.id && <Check size={12}/>}</div>))}</div>)}</div><div onClick={() => setOrderSample(!orderSample)} className={`p-4 rounded-lg border cursor-pointer transition-all flex items-start gap-3 ${orderSample ? 'border-purple-600 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}><div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 mt-0.5 ${orderSample ? 'bg-purple-600 border-purple-600 text-white' : 'bg-white border-gray-300'}`}>{orderSample && <Check size={12} />}</div><div><div className="font-bold text-sm text-gray-900 flex justify-between w-full"><span>先订购A4材质小样?</span><span>+¥{SAMPLE_PRICE}</span></div><p className="text-xs text-gray-500 mt-1">不确定效果？先买个小样看看颜色和质感（运费全免）。</p></div></div></div></div><div className="p-6 border-t border-gray-100 bg-gray-50"><div className="text-xs text-gray-500 mb-2">{selectedCount} 幅 · {Math.round(selectedRatio * areaSqm * 100) / 100} 平米 {orderSample && <span className="text-purple-600 ml-1">+ 小样</span>}</div><div className="text-4xl font-bold text-gray-900 mb-6">¥{finalPrice}</div><button onClick={() => setActiveStep('checkout')} className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg hover:bg-black hover:shadow-xl transition-all flex items-center justify-center gap-2">下一步：确认订单 <ArrowRight size={18} /></button></div></div></div></div>
+               );
+          }
+
+          // View 5: Checkout (UPDATED)
+          if (activeStep === 'checkout') {
+             return (
+                <div className="min-h-screen bg-white flex flex-col"><GlobalHeader /><div className="flex-1 flex flex-col lg:flex-row animate-slide-up"><div className="w-full lg:w-1/2 bg-gray-100 p-8 lg:p-16 flex flex-col items-center justify-center border-r border-gray-200 relative"><button onClick={() => setActiveStep('configurator')} className="absolute top-8 left-8 flex items-center gap-2 text-gray-500 hover:text-black text-sm font-medium transition-colors"><ChevronLeft size={16}/> 返回修改</button><div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-sm flex flex-col items-center text-center group max-w-md w-full hover:shadow-lg"><div className="w-full aspect-[4/3] bg-gray-100 rounded-2xl overflow-hidden border-4 border-white shadow-lg mb-6 relative group-hover:scale-[1.02] transition-transform duration-500 ease-out origin-bottom-center tilt-hover-img"><img src={pattern.url} className="w-full h-full object-cover" /><div className="absolute bottom-0 left-0 bg-black/60 text-white text-xs px-3 py-1 backdrop-blur-md rounded-tr-lg font-mono">{width} x {height} cm</div></div><div className="w-full"><div className="flex justify-between items-center mb-2"><div className="text-[10px] font-mono text-gray-400 bg-gray-50 px-2 py-1 rounded border border-gray-100">#{orderId}</div><div className="flex gap-1"><span className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md text-xs font-bold">{selectedPanels.size}幅</span></div></div><h3 className="font-bold text-2xl text-gray-900 mb-1 text-left">{pattern.name}</h3><p className="text-sm text-gray-500 text-left">{material.name}</p></div></div></div><div className="w-full lg:w-1/2 p-8 lg:p-16 flex flex-col overflow-y-auto max-h-[calc(100vh-64px)]"><div className="max-w-lg mx-auto w-full"><h2 className="text-2xl font-bold mb-8 text-gray-900">收货信息</h2><div className="space-y-5 mb-10"><div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">收货人姓名</label><input type="text" value={customerInfo.name} onChange={(e) => setCustomerInfo({...customerInfo, name: e.target.value})} className={`w-full p-4 border bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none transition-all ${formErrors.name ? 'border-red-500' : 'border-gray-200'}`} placeholder="例如：张三" />{formErrors.name && <p className="text-red-500 text-xs mt-1">{formErrors.name}</p>}</div><div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">联系电话</label><input type="tel" value={customerInfo.phone} onChange={(e) => setCustomerInfo({...customerInfo, phone: e.target.value})} className={`w-full p-4 border bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none transition-all ${formErrors.phone ? 'border-red-500' : 'border-gray-200'}`} placeholder="138 xxxx xxxx" />{formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}</div><div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">详细地址</label><textarea value={customerInfo.address} onChange={(e) => setCustomerInfo({...customerInfo, address: e.target.value})} className={`w-full p-4 border bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none transition-all resize-none h-24 ${formErrors.address ? 'border-red-500' : 'border-gray-200'}`} placeholder="省市区、街道、门牌号" />{formErrors.address && <p className="text-red-500 text-xs mt-1">{formErrors.address}</p>}</div></div><div className="mb-10"><h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2"><Sparkles size={16} className="text-purple-500"/> 搭配推荐</h3><div className="space-y-3"><div onClick={() => setIncludeKit(!includeKit)} className={`border rounded-xl p-4 cursor-pointer transition-all flex items-center justify-between hover:border-purple-400 group ${includeKit ? 'border-purple-600 bg-purple-50/50' : 'border-gray-200'}`}><div className="flex items-center gap-4"><div className={`w-6 h-6 rounded border flex items-center justify-center transition-colors ${includeKit ? 'bg-purple-600 border-purple-600 text-white' : 'bg-white border-gray-300 group-hover:border-purple-400'}`}><Check size={14}/></div><div><div className="font-bold text-gray-900">新手防翻车安装包</div><div className="text-xs text-gray-500 mt-0.5">含专用胶水、专业刮板、美工刀</div></div></div><div className="font-bold text-gray-900">+¥{KIT_PRICE}</div></div>{RECOMMENDATIONS.map(rec => { const isSelected = selectedRecs.has(rec.id); return ( <div key={rec.id} onClick={() => toggleRec(rec.id)} className={`border rounded-xl p-4 cursor-pointer transition-all flex items-center justify-between hover:border-purple-400 group ${isSelected ? 'border-purple-600 bg-purple-50/50' : 'border-gray-200'}`}> <div className="flex items-center gap-4"> <div className={`w-6 h-6 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-purple-600 border-purple-600 text-white' : 'bg-white border-gray-300 group-hover:border-purple-400'}`}><Check size={14}/></div> <div> <div className="font-bold text-gray-900 flex items-center gap-2">{rec.name} {rec.icon}</div> <div className="text-xs text-gray-500 mt-0.5">{rec.desc}</div> </div> </div> <div className="font-bold text-gray-900">+¥{rec.price}</div> </div> ) })}</div></div><button onClick={handlePay} className="w-full bg-black text-white py-5 rounded-2xl font-bold text-xl hover:bg-gray-800 shadow-xl transition-all active:scale-[0.98] flex items-center justify-center gap-3">确认支付 ¥{finalPrice} <ArrowRight size={20} /></button><div className="text-center mt-4 text-xs text-gray-400">加密支付保障 · 7天无理由退换（定制品除外）</div></div></div></div></div>
+             );
+          }
+
+          // View 6: Success (Same)
+          if (activeStep === 'success') {
+              return (
+                <div className="min-h-screen bg-white flex items-center justify-center p-6"><div className="text-center max-w-md animate-slide-up w-full"><div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6"><Check size={40} strokeWidth={4}/></div><h1 className="text-3xl font-bold mb-2 text-gray-900">支付成功！</h1><p className="text-gray-500 mb-8">感谢您的信任，订单号 <span className="font-mono font-bold text-black">#{orderId}</span></p><div className="bg-gray-50 rounded-2xl p-6 text-left mb-8 border border-gray-100"><h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-4">配送信息</h3><div className="space-y-2 text-sm"><div className="flex justify-between"><span className="text-gray-500">收货人</span><span className="font-medium text-gray-900">{customerInfo.name}</span></div><div className="flex justify-between"><span className="text-gray-500">电话</span><span className="font-medium text-gray-900">{customerInfo.phone}</span></div><div className="pt-2 border-t border-gray-200 mt-2"><span className="text-gray-500 block mb-1">地址</span><span className="font-medium text-gray-900 block leading-relaxed">{customerInfo.address}</span></div></div></div><div className="flex flex-col gap-3"><button onClick={() => setActiveStep('orders')} className="w-full bg-black text-white px-8 py-3 rounded-xl font-bold hover:bg-gray-800 transition-all">查看我的订单</button><button onClick={() => window.location.reload()} className="w-full bg-white text-gray-600 border border-gray-200 px-8 py-3 rounded-xl font-bold hover:bg-gray-50 transition-all">返回首页</button></div></div></div>
+              );
+          }
+
+          // View 7: Order Management (Same)
+          if (activeStep === 'orders') {
+              return (
+                  <div className="min-h-screen bg-gray-50 flex flex-col"><GlobalHeader /><main className="flex-1 max-w-4xl w-full mx-auto px-6 py-12 animate-fade-in"><h1 className="text-3xl font-bold text-gray-900 mb-8 flex items-center gap-3"><User size={32} className="text-purple-600"/> 我的订单</h1>{orders.length === 0 ? (<div className="text-center py-20 bg-white rounded-2xl border border-gray-200 shadow-sm"><div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><ShoppingBag size={24} /></div><p className="text-gray-500 mb-6">您还没有订单</p><button onClick={() => setActiveStep('gallery')} className="bg-black text-white px-6 py-2 rounded-lg font-bold text-sm">去逛逛</button></div>) : (<div className="space-y-4">{orders.map((order) => (<div key={order.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"><div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center"><div className="flex items-center gap-4"><span className="font-bold text-gray-900">#{order.id}</span><span className="text-xs text-gray-500">{order.date}</span></div><span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">{order.status}</span></div><div className="p-4 flex gap-4"><div className="w-20 h-20 bg-gray-200 rounded-lg bg-cover bg-center shrink-0" style={{backgroundImage: `url(${order.pattern.thumb})`}}></div><div className="flex-1"><h3 className="font-bold text-gray-900">{order.pattern.name}</h3><div className="text-sm text-gray-500 mt-1 space-y-1"><p>{order.material.name}</p><p>{order.width}x{order.height}cm · {order.items}</p></div></div><div className="text-right self-center"><div className="font-bold text-lg">¥{order.price}</div><button className="text-purple-600 text-xs font-bold mt-2 hover:underline">查看详情</button></div></div></div>))}</div>)}</main></div>
+              );
+          }
+
+          return null;
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<WallArchitect />);
+    </script>
+</body>
+</html>
